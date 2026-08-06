@@ -53,11 +53,26 @@ class Paranoia(commands.Cog):
         if message.author.bot:
             return
 
-        # Check if this author has an active timer and said RESET
-        if message.author.id in paranoia_games and message.content.strip().upper() == "RESET":
+        if message.author.id not in paranoia_games:
+            return
+
+        content = message.content.strip().upper()
+
+        # Player says RESET -> keep the timer alive
+        if content == "RESET":
             game = paranoia_games[message.author.id]
             game["last_reset"] = datetime.utcnow()
             await message.channel.send(f"🔄 Timer reset for {message.author.mention}. Stay sharp.")
+            return
+
+        # Player says FINISH -> they win, timer stops
+        if content == "FINISH":
+            paranoia_games.pop(message.author.id)
+            await message.channel.send(
+                f"🏆 **{message.author.mention} has beaten Paranoia!**\n"
+                f"The clock stops. Well played."
+            )
+            return
 
     @tasks.loop(seconds=1)
     async def check_timers(self):
@@ -103,3 +118,4 @@ class Paranoia(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Paranoia(bot))
+
