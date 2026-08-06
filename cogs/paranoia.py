@@ -57,8 +57,6 @@ class Paranoia(commands.Cog):
         if message.author.id in paranoia_games and message.content.strip().upper() == "RESET":
             game = paranoia_games[message.author.id]
             game["last_reset"] = datetime.utcnow()
-            game["warned_30"] = False
-            game["warned_10"] = False
             await message.channel.send(f"🔄 Timer reset for {message.author.mention}. Stay sharp.")
 
     @tasks.loop(seconds=1)
@@ -97,20 +95,6 @@ class Paranoia(commands.Cog):
                     f"{lost_puzzle_note}"
                 )
                 continue
-
-            # 30-second warning
-            if remaining <= 30 and not game["warned_30"]:
-                game["warned_30"] = True
-                member = channel.guild.get_member(user_id) if channel.guild else None
-                mention = member.mention if member else f"<@{user_id}>"
-                await channel.send(f"⚠️ {mention}, **30 seconds** left. Say **RESET**.")
-
-            # 10-second warning
-            if remaining <= 10 and not game["warned_10"]:
-                game["warned_10"] = True
-                member = channel.guild.get_member(user_id) if channel.guild else None
-                mention = member.mention if member else f"<@{user_id}>"
-                await channel.send(f"🚨 {mention}, **10 seconds** left!! Say **RESET** now!")
 
     @check_timers.before_loop
     async def before_check_timers(self):
