@@ -39,9 +39,9 @@ class Pandora(commands.Cog):
 
         rows = []
 
-        for row in range(6):
-            start = row * 6
-            numbers = board[start:start + 6]
+        for row in range(7):
+            start = row * 7
+            numbers = board[start:start + 7]
 
             rows.append(" ".join(f"{number:04}" for number in numbers))
 
