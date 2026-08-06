@@ -1,0 +1,121 @@
+import discord
+from discord.ext import commands, tasks
+from datetime import datetime, timedelta
+
+# Stores active Paranoia timers
+# { user_id: {"channel_id": int, "last_reset": datetime} }
+paranoia_games = {}
+
+RESET_SECONDS = 90
+
+
+class Paranoia(commands.Cog):
+
+    def __init__(self, bot):
+        self.bot = bot
+        self.check_timers.start()
+
+    def cog_unload(self):
+        self.check_timers.cancel()
+
+    @commands.command(name="paranoia")
+    async def paranoia(self, ctx, action: str = None):
+
+        # !paranoia stop
+        if action and action.lower() == "stop":
+            if ctx.author.id in paranoia_games:
+                paranoia_games.pop(ctx.author.id)
+                await ctx.send(f"🛑 Paranoia timer stopped for {ctx.author.mention}.")
+            else:
+                await ctx.send("❌ You don't have a Paranoia timer running.")
+            return
+
+        # Prevent multiple timers
+        if ctx.author.id in paranoia_games:
+            await ctx.send("⏱️ You already have a Paranoia timer running! Say **RESET** to keep it alive.")
+            return
+
+        paranoia_games[ctx.author.id] = {
+            "channel_id": ctx.channel.id,
+            "last_reset": datetime.utcnow()
+        }
+
+        await ctx.send(
+            f"☠️ **Paranoia activated for {ctx.author.mention}!**\n\n"
+            f"You have **{RESET_SECONDS} seconds**. Say **RESET** in chat to reset the clock.\n"
+            f"Fail to reset in time and you lose."
+        )
+
+    @commands.Cog.listener()
+    async def on_message(self, message):
+
+        # Ignore bots (including this one)
+        if message.author.bot:
+            return
+
+        # Check if this author has an active timer and said RESET
+        if message.author.id in paranoia_games and message.content.strip().upper() == "RESET":
+            game = paranoia_games[message.author.id]
+            game["last_reset"] = datetime.utcnow()
+            game["warned_30"] = False
+            game["warned_10"] = False
+            await message.channel.send(f"🔄 Timer reset for {message.author.mention}. Stay sharp.")
+
+    @tasks.loop(seconds=1)
+    async def check_timers(self):
+
+        now = datetime.utcnow()
+
+        # Iterate over a copy since we may remove entries mid-loop
+        for user_id, game in list(paranoia_games.items()):
+
+            elapsed = (now - game["last_reset"]).total_seconds()
+            remaining = RESET_SECONDS - elapsed
+
+            channel = self.bot.get_channel(game["channel_id"])
+            if channel is None:
+                continue
+
+            # Time's up — they lose
+            if remaining <= 0:
+                paranoia_games.pop(user_id)
+
+                # End their Pandora game too, if they have one running
+                pandora_cog = self.bot.get_cog("Pandora")
+                lost_puzzle_note = ""
+                if pandora_cog is not None:
+                    from cogs.pandora import pandora_games as pandora_state  # adjust import path if needed
+                    if user_id in pandora_state:
+                        pandora_state.pop(user_id)
+                        lost_puzzle_note = "\nYour Pandora's Box game has also been ended."
+
+                member = channel.guild.get_member(user_id) if channel.guild else None
+                mention = member.mention if member else f"<@{user_id}>"
+
+                await channel.send(
+                    f"💀 **{mention} failed to reset in time. Paranoia claims another victim.**"
+                    f"{lost_puzzle_note}"
+                )
+                continue
+
+            # 30-second warning
+            if remaining <= 30 and not game["warned_30"]:
+                game["warned_30"] = True
+                member = channel.guild.get_member(user_id) if channel.guild else None
+                mention = member.mention if member else f"<@{user_id}>"
+                await channel.send(f"⚠️ {mention}, **30 seconds** left. Say **RESET**.")
+
+            # 10-second warning
+            if remaining <= 10 and not game["warned_10"]:
+                game["warned_10"] = True
+                member = channel.guild.get_member(user_id) if channel.guild else None
+                mention = member.mention if member else f"<@{user_id}>"
+                await channel.send(f"🚨 {mention}, **10 seconds** left!! Say **RESET** now!")
+
+    @check_timers.before_loop
+    async def before_check_timers(self):
+        await self.bot.wait_until_ready()
+
+
+async def setup(bot):
+    await bot.add_cog(Paranoia(bot))
