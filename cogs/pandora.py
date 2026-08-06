@@ -13,7 +13,7 @@ class Pandora(commands.Cog):
 
     def generate_board(self):
         """Generate 36 unique numbers from 0000-9999."""
-        return random.sample(range(10000), 36)
+        return random.sample(range(10000), 49)
 
     def generate_jewels(self, board):
         """Randomly place 4 jewels on the board."""
