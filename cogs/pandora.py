@@ -3,7 +3,13 @@ from discord.ext import commands
 import random
 
 # Stores active Pandora games
-pandora_games = {}
+pandora_games[ctx.author.id] = {
+    "board": board,
+    "jewels": jewels,
+    "searched": set(),
+    "letters_found": [],
+    "code": code
+}
 
 
 class Pandora(commands.Cog):
@@ -12,8 +18,8 @@ class Pandora(commands.Cog):
         self.bot = bot
 
     def generate_board(self):
-        """Generate 64 unique numbers from 000-999."""
-        return random.sample(range(1000), 36)
+        """Generate 64 unique numbers from 0000-9999."""
+        return random.sample(range(10000), 36)
 
     def generate_jewels(self, board):
         """Randomly place 4 jewels on the board."""
@@ -123,6 +129,50 @@ class Pandora(commands.Cog):
                 "🔓 You have found all four letters!\n\n"
                 "Use `!unlock ABCD` to attempt opening Pandora's Box."
             )
+            @commands.command(name="unlock")
+    async def unlock(self, ctx, guess: str):
+
+        # Make sure the player has a game running
+        if ctx.author.id not in pandora_games:
+            await ctx.send("❌ You don't have an active Pandora's Box game.")
+            return
+
+        game = pandora_games[ctx.author.id]
+
+        # Make sure all letters have been found first
+        if len(game["letters_found"]) < 4:
+            await ctx.send(
+                "❌ You haven't found all four letters yet!"
+            )
+            return
+
+        guess = guess.upper()
+
+        # Must be exactly 4 letters
+        if len(guess) != 4 or not guess.isalpha():
+            await ctx.send(
+                "❌ Your guess must be exactly 4 letters.\n"
+                "Example: `!unlock ABCD`"
+            )
+            return
+
+        # Correct code
+        if guess == game["code"]:
+
+            await ctx.send(
+                "🎉 **Pandora's Box has opened!**\n\n"
+                f"🔓 Correct Code: **{game['code']}**"
+            )
+
+            # Remove completed game
+            pandora_games.pop(ctx.author.id)
+
+            return
+
+        # Wrong code
+        await ctx.send(
+            "❌ The box remains sealed..."
+        )
 
 async def setup(bot):
     await bot.add_cog(Pandora(bot))
