@@ -3,13 +3,7 @@ from discord.ext import commands
 import random
 
 # Stores active Pandora games
-pandora_games[ctx.author.id] = {
-    "board": board,
-    "jewels": jewels,
-    "searched": set(),
-    "letters_found": [],
-    "code": code
-}
+pandora_games = {}
 
 
 class Pandora(commands.Cog):
@@ -18,7 +12,7 @@ class Pandora(commands.Cog):
         self.bot = bot
 
     def generate_board(self):
-        """Generate 64 unique numbers from 0000-9999."""
+        """Generate 36 unique numbers from 0000-9999."""
         return random.sample(range(10000), 36)
 
     def generate_jewels(self, board):
@@ -41,7 +35,7 @@ class Pandora(commands.Cog):
         return jewels, code
 
     def format_board(self, board):
-        """Display the board as an 6x6 grid."""
+        """Display the board as a 6x6 grid."""
 
         rows = []
 
@@ -49,7 +43,7 @@ class Pandora(commands.Cog):
             start = row * 6
             numbers = board[start:start + 6]
 
-            rows.append(" ".join(f"{number:03}" for number in numbers))
+            rows.append(" ".join(f"{number:04}" for number in numbers))
 
         return "```text\n" + "\n".join(rows) + "\n```"
 
@@ -79,7 +73,7 @@ class Pandora(commands.Cog):
         await ctx.send(
             "📦 **Pandora's Box**\n\n"
             "Search the grid using:\n"
-            "`!search ###`\n\n"
+            "`!search ####`\n\n"
             + self.format_board(board)
         )
 
@@ -129,7 +123,8 @@ class Pandora(commands.Cog):
                 "🔓 You have found all four letters!\n\n"
                 "Use `!unlock ABCD` to attempt opening Pandora's Box."
             )
-            @commands.command(name="unlock")
+
+    @commands.command(name="unlock")
     async def unlock(self, ctx, guess: str):
 
         # Make sure the player has a game running
@@ -173,6 +168,7 @@ class Pandora(commands.Cog):
         await ctx.send(
             "❌ The box remains sealed..."
         )
+
 
 async def setup(bot):
     await bot.add_cog(Pandora(bot))
