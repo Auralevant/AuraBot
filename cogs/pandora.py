@@ -13,7 +13,7 @@ class Pandora(commands.Cog):
 
     def generate_board(self):
         """Generate 64 unique numbers from 000-999."""
-        return random.sample(range(1000), 64)
+        return random.sample(range(1000), 36)
 
     def generate_jewels(self, board):
         """Randomly place 4 jewels on the board."""
@@ -35,13 +35,13 @@ class Pandora(commands.Cog):
         return jewels, code
 
     def format_board(self, board):
-        """Display the board as an 8x8 grid."""
+        """Display the board as an 6x6 grid."""
 
         rows = []
 
-        for row in range(8):
-            start = row * 8
-            numbers = board[start:start + 8]
+        for row in range(6):
+            start = row * 6
+            numbers = board[start:start + 6]
 
             rows.append(" ".join(f"{number:03}" for number in numbers))
 
