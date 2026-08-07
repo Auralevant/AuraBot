@@ -182,7 +182,7 @@ def render_cell(figure_shape: str, word: str) -> Image.Image:
     SHAPE_FUNCS[figure_shape](draw, cx, cy, CELL_SIZE * 0.85)
 
     text = word.upper()
-    max_text_width = CELL_SIZE * 0.85
+    max_text_width = CELL_SIZE * 1.00
     font_size = int(CELL_SIZE * 0.70)
     font = get_font(font_size)
     bbox = draw.textbbox((0, 0), text, font=font)
