@@ -18,6 +18,7 @@ the final result dict to console and you can hook `on_game_complete`
 import asyncio
 import io
 import math
+import os
 import random
 import time
 
@@ -42,6 +43,11 @@ CELL_SIZE = 300
 PADDING = 30
 
 FONT_PATHS = [
+    # Bundled with this cog — put DejaVuSans-Bold.ttf in a "fonts" folder
+    # next to this file so text renders identically no matter what fonts
+    # (if any) happen to be installed on the host. This is checked first.
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts", "DejaVuSans-Bold.ttf"),
+    # Fallbacks in case the bundled font is missing for some reason.
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/usr/local/lib/python3.12/dist-packages/matplotlib/mpl-data/fonts/ttf/DejaVuSans-Bold.ttf",
     "C:/Windows/Fonts/arialbd.ttf",
@@ -98,16 +104,38 @@ def _heart_curve_points(cx, cy, scale, flip=False, n=200):
 
 def _draw_heart(draw, cx, cy, s):
     scale = s / 34.0
-    pts = _heart_curve_points(cx, cy + s * 0.06, scale, flip=False)
+    # bbox of the curve isn't symmetric around the formula's (0,0), so shift
+    # so the heart's visual bounding box is centered in the cell like the
+    # other shapes.
+    center_y = cy - 2.54 * scale
+    pts = _heart_curve_points(cx, center_y, scale, flip=False)
     draw.polygon(pts, fill=RED)
 
 
 def _draw_spade(draw, cx, cy, s):
     scale = s * 0.78 / 34.0
-    pts = _heart_curve_points(cx, cy - s * 0.16, scale, flip=True)
+    center_y = cy - s * 0.16
+    pts = _heart_curve_points(cx, center_y, scale, flip=True)
     draw.polygon(pts, fill=RED)
+
+    # The naive vertical flip of the heart formula leaves a small concave
+    # notch between the two lobes (visible as a white gap right above the
+    # stem). Patch it by filling the valley between the lobes solid red.
+    n = 80
+    patch_raw = []
+    for i in range(n + 1):
+        t = -0.7 + (1.4 * i / n)
+        x = 16 * math.sin(t) ** 3
+        y = 13 * math.cos(t) - 5 * math.cos(2 * t) - 2 * math.cos(3 * t) - math.cos(4 * t)
+        patch_raw.append((x, y))
+    cap = 13.5  # deeper than the lobes' own max (~11.9), guarantees overlap
+    patch_pts = [(cx + patch_raw[0][0] * scale, center_y + cap * scale)]
+    patch_pts += [(cx + x * scale, center_y + y * scale) for x, y in patch_raw]
+    patch_pts += [(cx + patch_raw[-1][0] * scale, center_y + cap * scale)]
+    draw.polygon(patch_pts, fill=RED)
+
     stem_w = s * 0.09
-    stem_top = cy + s * 0.10
+    stem_top = center_y + 10 * scale
     draw.polygon([
         (cx - stem_w, stem_top),
         (cx + stem_w, stem_top),
@@ -154,15 +182,23 @@ def render_cell(figure_shape: str, word: str) -> Image.Image:
     SHAPE_FUNCS[figure_shape](draw, cx, cy, CELL_SIZE * 0.85)
 
     text = word.upper()
-    font_size = int(CELL_SIZE * 0.17)
+    max_text_width = CELL_SIZE * 0.82
+    font_size = int(CELL_SIZE * 0.19)
     font = get_font(font_size)
     bbox = draw.textbbox((0, 0), text, font=font)
-    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    tw = bbox[2] - bbox[0]
+    # Shrink to fit for longer words (e.g. "TRIANGLE", "DIAMOND") so nothing
+    # ever runs off the edge of the cell.
+    while tw > max_text_width and font_size > 10:
+        font_size -= 2
+        font = get_font(font_size)
+        bbox = draw.textbbox((0, 0), text, font=font)
+        tw = bbox[2] - bbox[0]
+    th = bbox[3] - bbox[1]
     tx, ty = cx - tw / 2 - bbox[0], cy - th / 2 - bbox[1]
-    # White outline first for a bold "sticker" look that pops off the red shape,
-    # then the black fill on top.
-    draw.text((tx, ty), text, font=font, fill=WHITE, stroke_width=6, stroke_fill=WHITE)
-    draw.text((tx, ty), text, font=font, fill=BLACK, stroke_width=3, stroke_fill=BLACK)
+    # Single outlined pass: black text with a thin white halo so it reads
+    # clearly against the red shape without looking like a bold black blob.
+    draw.text((tx, ty), text, font=font, fill=BLACK, stroke_width=3, stroke_fill=WHITE)
     return img
 
 
