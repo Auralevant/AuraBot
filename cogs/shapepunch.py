@@ -17,6 +17,7 @@ the final result dict to console and you can hook `on_game_complete`
 
 import asyncio
 import io
+import math
 import random
 import time
 
@@ -82,27 +83,36 @@ def _draw_diamond(draw, cx, cy, s):
     draw.polygon(pts, fill=RED)
 
 
+def _heart_curve_points(cx, cy, scale, flip=False, n=200):
+    """Smooth parametric heart outline (much cleaner than stitched ellipses)."""
+    pts = []
+    for i in range(n):
+        t = (i / n) * 2 * math.pi
+        x = 16 * math.sin(t) ** 3
+        y = 13 * math.cos(t) - 5 * math.cos(2 * t) - 2 * math.cos(3 * t) - math.cos(4 * t)
+        if flip:
+            y = -y
+        pts.append((cx + x * scale, cy - y * scale))
+    return pts
+
+
 def _draw_heart(draw, cx, cy, s):
-    r = s * 0.28
-    draw.ellipse([cx - r * 1.9, cy - r * 1.4, cx - r * 0.1 + 0.01, cy + r * 0.6], fill=RED)
-    draw.ellipse([cx + r * 0.1 - 0.01, cy - r * 1.4, cx + r * 1.9, cy + r * 0.6], fill=RED)
-    pts = [(cx - r * 1.95, cy), (cx + r * 1.95, cy), (cx, cy + r * 2.3)]
+    scale = s / 34.0
+    pts = _heart_curve_points(cx, cy + s * 0.06, scale, flip=False)
     draw.polygon(pts, fill=RED)
 
 
 def _draw_spade(draw, cx, cy, s):
-    r = s * 0.28
-    top_cy = cy - s * 0.08
-    draw.ellipse([cx - r * 1.9, top_cy - r * 0.6, cx - r * 0.1 + 0.01, top_cy + r * 1.4], fill=RED)
-    draw.ellipse([cx + r * 0.1 - 0.01, top_cy - r * 0.6, cx + r * 1.9, top_cy + r * 1.4], fill=RED)
-    pts = [(cx - r * 1.95, top_cy + r * 0.8), (cx + r * 1.95, top_cy + r * 0.8), (cx, top_cy - r * 1.5)]
+    scale = s * 0.78 / 34.0
+    pts = _heart_curve_points(cx, cy - s * 0.16, scale, flip=True)
     draw.polygon(pts, fill=RED)
-    stem_w = s * 0.1
+    stem_w = s * 0.09
+    stem_top = cy + s * 0.10
     draw.polygon([
-        (cx - stem_w, top_cy + r * 0.9),
-        (cx + stem_w, top_cy + r * 0.9),
-        (cx + stem_w * 1.6, cy + s * 0.42),
-        (cx - stem_w * 1.6, cy + s * 0.42),
+        (cx - stem_w, stem_top),
+        (cx + stem_w, stem_top),
+        (cx + stem_w * 1.9, cy + s * 0.44),
+        (cx - stem_w * 1.9, cy + s * 0.44),
     ], fill=RED)
 
 
@@ -144,11 +154,15 @@ def render_cell(figure_shape: str, word: str) -> Image.Image:
     SHAPE_FUNCS[figure_shape](draw, cx, cy, CELL_SIZE * 0.85)
 
     text = word.upper()
-    font_size = int(CELL_SIZE * 0.1)
+    font_size = int(CELL_SIZE * 0.17)
     font = get_font(font_size)
     bbox = draw.textbbox((0, 0), text, font=font)
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    draw.text((cx - tw / 2 - bbox[0], cy - th / 2 - bbox[1]), text, font=font, fill=BLACK)
+    tx, ty = cx - tw / 2 - bbox[0], cy - th / 2 - bbox[1]
+    # White outline first for a bold "sticker" look that pops off the red shape,
+    # then the black fill on top.
+    draw.text((tx, ty), text, font=font, fill=WHITE, stroke_width=6, stroke_fill=WHITE)
+    draw.text((tx, ty), text, font=font, fill=BLACK, stroke_width=3, stroke_fill=BLACK)
     return img
 
 
