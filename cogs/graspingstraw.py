@@ -27,9 +27,12 @@ import discord
 from discord.ext import commands
 
 STARTING_LIVES = 3
-JOIN_SECONDS = 20
-CLAIM_SECONDS = 20
-MIN_PLAYERS = 2
+JOIN_SECONDS = 15
+CLAIM_SECONDS = 15
+CLAIM_SECONDS_FLOOR = 5       # timer never shrinks below this
+CLAIM_SHRINK_EVERY = 5        # every N rounds...
+CLAIM_SHRINK_AMOUNT = 0.5     # ...timer drops by this many seconds
+MIN_PLAYERS = 2               # 1 player = solo endurance mode, 0 = cancelled
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +62,7 @@ class Game:
     round_problems: dict = field(default_factory=dict)  # letter -> Problem
     claims: dict = field(default_factory=dict)           # user_id -> letter
     lobby_message: discord.Message = None
+    solo: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +160,12 @@ class GraspingStraw(commands.Cog):
     def alive_players(self, game: Game):
         return [p for p in game.players.values() if p.alive]
 
+    def claim_time_for_round(self, round_number: int) -> float:
+        """Timer shrinks by CLAIM_SHRINK_AMOUNT every CLAIM_SHRINK_EVERY rounds, down to a floor."""
+        decrements = (round_number - 1) // CLAIM_SHRINK_EVERY
+        t = CLAIM_SECONDS - (CLAIM_SHRINK_AMOUNT * decrements)
+        return max(CLAIM_SECONDS_FLOOR, t)
+
     # -- start command -------------------------------------------------------
 
     @commands.command(name="graspingstraw", aliases=["gs"])
@@ -172,50 +182,62 @@ class GraspingStraw(commands.Cog):
         game.lobby_message = await ctx.send(embed=view.build_embed(), view=view)
 
     async def begin_game(self, game: Game):
-        if len(game.players) < MIN_PLAYERS:
-            await game.channel.send(
-                f"Not enough players joined (need at least {MIN_PLAYERS}). Game cancelled."
-            )
+        if len(game.players) == 0:
+            await game.channel.send("No one joined in time. Game cancelled.")
             game.state = "finished"
             self.games.pop(game.channel.id, None)
             return
 
-        await game.channel.send(
-            f"**{len(game.players)} players** are in! Grasping Straws begins now. 🍀"
-        )
+        if len(game.players) == 1:
+            game.solo = True
+            solo_player = next(iter(game.players.values()))
+            await game.channel.send(
+                f"Only **{solo_player.member.display_name}** joined — starting **Endurance Mode**! "
+                "Survive as many rounds as you can before you run out of lives. 🍀"
+            )
+        else:
+            await game.channel.send(
+                f"**{len(game.players)} players** are in! Grasping Straws begins now. 🍀"
+            )
+
         await self.start_round(game)
 
     # -- round flow ----------------------------------------------------------
 
     async def start_round(self, game: Game):
         alive = self.alive_players(game)
-        if len(alive) <= 1:
+        game_over = (len(alive) == 0) if game.solo else (len(alive) <= 1)
+        if game_over:
             await self.end_game(game)
             return
 
         game.round_number += 1
-        problem_count = len(alive) + 1
+        problem_count = 3 if game.solo else len(alive) + 1
         game.round_problems = make_round_problems(problem_count)
         game.claims = {}
         game.state = "claiming"
 
+        claim_time = self.claim_time_for_round(game.round_number)
+
         lines = [f"**{letter}.** {p.display}" for letter, p in game.round_problems.items()]
+        title = f"🧮 Round {game.round_number}" + (" (Endurance)" if game.solo else "") + " — Claim a problem!"
         embed = discord.Embed(
-            title=f"🧮 Round {game.round_number} — Claim a problem!",
+            title=title,
             description="\n".join(lines),
             color=discord.Color.gold(),
         )
         embed.add_field(
             name="How to claim",
-            value=f"Type `!claim <letter>` (e.g. `!claim A`). You have {CLAIM_SECONDS}s.\n"
+            value=f"Type `!claim <letter>` (e.g. `!claim A`). You have {claim_time:g}s.\n"
                   "Avoid the highest AND lowest answers — good luck!",
             inline=False,
         )
-        alive_names = ", ".join(p.member.display_name for p in alive)
-        embed.add_field(name="Still in it", value=alive_names, inline=False)
+        if not game.solo:
+            alive_names = ", ".join(p.member.display_name for p in alive)
+            embed.add_field(name="Still in it", value=alive_names, inline=False)
         await game.channel.send(embed=embed)
 
-        await asyncio.sleep(CLAIM_SECONDS)
+        await asyncio.sleep(claim_time)
         await self.resolve_round(game)
 
     @commands.command(name="claim")
@@ -309,7 +331,8 @@ class GraspingStraw(commands.Cog):
         await game.channel.send(embed=embed)
 
         still_alive = self.alive_players(game)
-        if len(still_alive) <= 1:
+        game_over = (len(still_alive) == 0) if game.solo else (len(still_alive) <= 1)
+        if game_over:
             await self.end_game(game)
         else:
             await asyncio.sleep(3)
@@ -318,14 +341,27 @@ class GraspingStraw(commands.Cog):
     async def end_game(self, game: Game):
         game.state = "finished"
         alive = self.alive_players(game)
-        if len(alive) == 1:
+
+        if game.solo:
+            solo_player = next(iter(game.players.values()))
+            rounds_survived = game.round_number - 1  # they were eliminated on round_number, so cleared this many
+            await game.channel.send(
+                f"💀 **{solo_player.member.display_name}** was eliminated!\n"
+                f"🏁 **Endurance result: {rounds_survived} round(s) survived.**"
+            )
+        elif len(alive) == 1:
             winner = alive[0]
             await game.channel.send(f"🏆 **{winner.member.display_name} wins Grasping Straws!** 🏆")
         elif len(alive) == 0:
             await game.channel.send("💀 Everyone was eliminated at once — no winner this time!")
         else:
             await game.channel.send("Game ended.")
+
         self.games.pop(game.channel.id, None)
+
+
+async def setup(bot: commands.Bot):
+    await bot.add_cog(GraspingStraw(bot))
 
 
 async def setup(bot: commands.Bot):
