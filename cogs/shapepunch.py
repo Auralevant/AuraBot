@@ -182,8 +182,8 @@ def render_cell(figure_shape: str, word: str) -> Image.Image:
     SHAPE_FUNCS[figure_shape](draw, cx, cy, CELL_SIZE * 0.85)
 
     text = word.upper()
-    max_text_width = CELL_SIZE * 0.82
-    font_size = int(CELL_SIZE * 0.19)
+    max_text_width = CELL_SIZE * 0.85
+    font_size = int(CELL_SIZE * 0.26)
     font = get_font(font_size)
     bbox = draw.textbbox((0, 0), text, font=font)
     tw = bbox[2] - bbox[0]
@@ -196,9 +196,8 @@ def render_cell(figure_shape: str, word: str) -> Image.Image:
         tw = bbox[2] - bbox[0]
     th = bbox[3] - bbox[1]
     tx, ty = cx - tw / 2 - bbox[0], cy - th / 2 - bbox[1]
-    # Single outlined pass: black text with a thin white halo so it reads
-    # clearly against the red shape without looking like a bold black blob.
-    draw.text((tx, ty), text, font=font, fill=BLACK, stroke_width=3, stroke_fill=WHITE)
+    # Plain black text, no white halo/background — just solid black on red.
+    draw.text((tx, ty), text, font=font, fill=BLACK)
     return img
 
 
