@@ -43,7 +43,7 @@ class Paranoia(commands.Cog):
         await ctx.send(
             f"☠️ **Paranoia activated for {ctx.author.mention}!**\n\n"
             f"You have **{RESET_SECONDS} seconds**. Say **RESET** in chat to reset the clock.\n"
-            f"Fail to reset in time and you lose."
+            f"Say **FINISH** to stop the paranoia. Fail to reset in time and you lose."
         )
 
     @commands.Cog.listener()
@@ -62,7 +62,7 @@ class Paranoia(commands.Cog):
         if content == "RESET":
             game = paranoia_games[message.author.id]
             game["last_reset"] = datetime.utcnow()
-            await message.channel.send(f"🔄 Timer reset for {message.author.mention}. Stay sharp.")
+            await message.channel.send(f"🔄 Timer reset for {message.author.mention}. Don't lose focus.")
             return
 
         # Player says FINISH -> they win, timer stops
@@ -70,7 +70,7 @@ class Paranoia(commands.Cog):
             paranoia_games.pop(message.author.id)
             await message.channel.send(
                 f"🏆 **{message.author.mention} has beaten Paranoia!**\n"
-                f"The clock stops. Well played."
+                f"The paranoia has stopped. Congratulations!"
             )
             return
 
