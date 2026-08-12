@@ -88,7 +88,7 @@ class StopwatchGame(commands.Cog):
 
     def _instructions(self, target: float) -> str:
         return (
-            "🎮 **Beat the Clock — Instructions**\n"
+            "🎮 **Watch The Clock — Instructions**\n"
             f"• Stop the timer as close to the target as you can **without going over**.\n"
             f"• Every successful stop scores a point, and the time you stopped at becomes "
             f"the new (lower) target for the next round — it gets harder each time. "
