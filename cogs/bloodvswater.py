@@ -2,7 +2,7 @@
 Blood vs Water — emoji math challenge cog (single-player).
 
 Rules:
-- !bloodvswater starts a 4-minute round for whoever ran the command — only they
+- !bloodvswater starts a 5-minute round for whoever ran the command — only they
   can answer; guesses from anyone else in the channel are ignored.
 - The bot posts a row of droplet emojis: 💧 (water) = +1, 🩸 (blood) = -1.
 - The player types just the number (e.g. "-4" or "7") — no command prefix — to guess.
@@ -10,7 +10,8 @@ Rules:
     - Correct: bot says "Correct!", the player scores a point, next set posts immediately.
     - Incorrect: bot says "Incorrect!" (and reveals the answer), then waits 5 seconds
       before posting the next set. No point awarded.
-- Round lasts 5 minutes total; final score is announced when time's up.
+- Round lasts 5 minutes total; final score is announced when time's up, along
+  with accuracy (correct guesses / total guesses) as a tiebreaker stat.
 - Difficulty scales: Set 1 uses 3-5 emojis, Set 20 uses 18-20 emojis, capped at 25 max.
 
 Drop this file in your cogs folder and load it with:
@@ -27,7 +28,7 @@ from discord.ext import commands
 WATER = "\U0001F4A7"  # 💧
 BLOOD = "\U0001FA78"  # 🩸
 
-GAME_DURATION = 240        # 4 minutes, in seconds
+GAME_DURATION = 300        # 5 minutes, in seconds
 WRONG_GUESS_DELAY = 5      # seconds to wait after a wrong guess before the next set posts
 MAX_EMOJIS = 25            # hard cap regardless of set number
 DIFFICULTY_CAP_SET = 20    # set number at which difficulty stops increasing
@@ -45,6 +46,7 @@ class BloodVsWaterGame:
     def __init__(self, owner_id: int):
         self.owner_id = owner_id
         self.score = 0
+        self.attempts = 0
         self.set_number = 0
         self.current_answer = 0
         self.active = True
@@ -56,6 +58,15 @@ class BloodVsWaterGame:
 
     def add_point(self) -> None:
         self.score += 1
+        self.attempts += 1
+
+    def add_miss(self) -> None:
+        self.attempts += 1
+
+    @property
+    def accuracy(self) -> float:
+        """Accuracy as a fraction 0.0-1.0. 0 if no attempts were made yet."""
+        return self.score / self.attempts if self.attempts else 0.0
 
     # -- set generation ------------------------------------------------------
 
@@ -147,6 +158,7 @@ class BloodVsWater(commands.Cog):
             await message.channel.send(f"\u2705 **Correct!** {message.author.mention} scores a point.")
             await self._post_set(message.channel, game)
         else:
+            game.add_miss()
             await message.channel.send(
                 f"\u274C **Incorrect!** The answer was `{game.current_answer}`. "
                 f"Next set in {WRONG_GUESS_DELAY} seconds..."
@@ -184,10 +196,27 @@ class BloodVsWater(commands.Cog):
         await self._announce_results(channel, game)
 
     async def _announce_results(self, channel: discord.abc.Messageable, game: BloodVsWaterGame):
-        await channel.send(
-            f"\u23F0 **Time's up!** <@{game.owner_id}> finished with **{game.score}** "
-            f"point{'s' if game.score != 1 else ''}. {WATER}{BLOOD}"
+        pct = game.accuracy * 100
+        embed = discord.Embed(
+            title=f"{WATER}{BLOOD} Blood vs Water — Results",
+            color=discord.Color.red(),
         )
+        embed.add_field(name="Player", value=f"<@{game.owner_id}>", inline=False)
+        embed.add_field(name="Score", value=str(game.score), inline=True)
+        embed.add_field(
+            name="Accuracy",
+            value=f"{game.score}/{game.attempts} ({pct:.1f}%)",
+            inline=True,
+        )
+        embed.set_footer(text="Time's up!")
+
+        result_message = await channel.send(embed=embed)
+        try:
+            await result_message.pin(reason="Blood vs Water round results")
+        except (discord.Forbidden, discord.HTTPException):
+            # Bot may lack "Manage Messages" or the pin limit was hit — results
+            # still posted as an embed, just not pinned.
+            pass
 
 
 async def setup(bot: commands.Bot):
