@@ -122,7 +122,7 @@ class BloodVsWater(commands.Cog):
             f"{ctx.author.mention}'s round — only they can answer.\n"
             f"{WATER} = +1, {BLOOD} = \u22121. Add them up and just type the number when "
             "you know it (no command needed).\n"
-            f"You have **5 minutes** — a wrong guess reveals the answer "
+            f"You have **4 minutes** — a wrong guess reveals the answer "
             f"and the next set posts in {WRONG_GUESS_DELAY} seconds."
         )
         await self._post_set(ctx.channel, game)
