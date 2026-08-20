@@ -1,13 +1,16 @@
 """
-Blood vs Water — emoji math challenge cog.
+Blood vs Water — emoji math challenge cog (single-player).
 
 Rules:
-- !bloodvswater starts a round in the current channel.
+- !bloodvswater starts a 4-minute round for whoever ran the command — only they
+  can answer; guesses from anyone else in the channel are ignored.
 - The bot posts a row of droplet emojis: 💧 (water) = +1, 🩸 (blood) = -1.
-- Players type just the number (e.g. "-4" or "7") — no command prefix — to guess.
-- Correct guess: player scores a point, next (slightly harder) set is posted immediately.
-- Wrong guess: player gets a 5 second cooldown before their next guess is accepted.
-- Round lasts 5 minutes total; whoever has the most points when time's up wins.
+- The player types just the number (e.g. "-4" or "7") — no command prefix — to guess.
+- The FIRST guess on a set resolves it (further guesses on that set are ignored):
+    - Correct: bot says "Correct!", the player scores a point, next set posts immediately.
+    - Incorrect: bot says "Incorrect!" (and reveals the answer), then waits 5 seconds
+      before posting the next set. No point awarded.
+- Round lasts 5 minutes total; final score is announced when time's up.
 - Difficulty scales: Set 1 uses 3-5 emojis, Set 20 uses 18-20 emojis, capped at 25 max.
 
 Drop this file in your cogs folder and load it with:
@@ -17,7 +20,6 @@ Drop this file in your cogs folder and load it with:
 
 import asyncio
 import random
-import time
 
 import discord
 from discord.ext import commands
@@ -26,7 +28,7 @@ WATER = "\U0001F4A7"  # 💧
 BLOOD = "\U0001FA78"  # 🩸
 
 GAME_DURATION = 240        # 4 minutes, in seconds
-PENALTY_SECONDS = 5        # cooldown after a wrong guess
+WRONG_GUESS_DELAY = 5      # seconds to wait after a wrong guess before the next set posts
 MAX_EMOJIS = 25            # hard cap regardless of set number
 DIFFICULTY_CAP_SET = 20    # set number at which difficulty stops increasing
 
@@ -40,24 +42,20 @@ _BASE_END = 18
 class BloodVsWaterGame:
     """State for a single active Blood vs Water round in one channel."""
 
-    def __init__(self):
-        self.scores: dict[int, int] = {}
+    def __init__(self, owner_id: int):
+        self.owner_id = owner_id
+        self.score = 0
         self.set_number = 0
         self.current_answer = 0
-        self.cooldowns: dict[int, float] = {}  # user_id -> monotonic time cooldown ends
         self.active = True
+        # True while a set has been resolved (correct or incorrect) and we're
+        # waiting to post the next one — further guesses are ignored meanwhile.
+        self.locked = False
 
     # -- scoring / state helpers -------------------------------------------------
 
-    def add_point(self, user_id: int) -> None:
-        self.scores[user_id] = self.scores.get(user_id, 0) + 1
-
-    def cooldown_remaining(self, user_id: int) -> float:
-        remaining = self.cooldowns.get(user_id, 0.0) - time.monotonic()
-        return max(0.0, remaining)
-
-    def apply_penalty(self, user_id: int) -> None:
-        self.cooldowns[user_id] = time.monotonic() + PENALTY_SECONDS
+    def add_point(self) -> None:
+        self.score += 1
 
     # -- set generation ------------------------------------------------------
 
@@ -67,6 +65,7 @@ class BloodVsWaterGame:
         count = self._emoji_count_for_set(self.set_number)
         emojis = [random.choice((WATER, BLOOD)) for _ in range(count)]
         self.current_answer = emojis.count(WATER) - emojis.count(BLOOD)
+        self.locked = False
         return emojis
 
     @staticmethod
@@ -99,18 +98,21 @@ class BloodVsWater(commands.Cog):
     async def start_game(self, ctx: commands.Context):
         existing = self.games.get(ctx.channel.id)
         if existing and existing.active:
-            await ctx.send("A Blood vs Water round is already running in this channel!")
+            owner = ctx.guild.get_member(existing.owner_id) if ctx.guild else None
+            owner_name = owner.mention if owner else f"<@{existing.owner_id}>"
+            await ctx.send(f"A Blood vs Water round is already running here for {owner_name}!")
             return
 
-        game = BloodVsWaterGame()
+        game = BloodVsWaterGame(owner_id=ctx.author.id)
         self.games[ctx.channel.id] = game
 
         await ctx.send(
             f"{BLOOD}{WATER} **Blood vs Water** {WATER}{BLOOD}\n"
+            f"{ctx.author.mention}'s round — only they can answer.\n"
             f"{WATER} = +1, {BLOOD} = \u22121. Add them up and just type the number when "
             "you know it (no command needed).\n"
-            f"You have **5 minutes** — most points wins. A wrong guess costs you a "
-            f"{PENALTY_SECONDS}s penalty before you can guess again."
+            f"You have **5 minutes** — a wrong guess reveals the answer "
+            f"and the next set posts in {WRONG_GUESS_DELAY} seconds."
         )
         await self._post_set(ctx.channel, game)
 
@@ -125,7 +127,11 @@ class BloodVsWater(commands.Cog):
             return
 
         game = self.games.get(message.channel.id)
-        if not game or not game.active:
+        if not game or not game.active or game.locked:
+            return
+
+        # Only the player who started this round may answer.
+        if message.author.id != game.owner_id:
             return
 
         content = message.content.strip()
@@ -133,24 +139,21 @@ class BloodVsWater(commands.Cog):
         if guess is None:
             return
 
-        user_id = message.author.id
-        if game.cooldown_remaining(user_id) > 0:
-            # Still serving a penalty — ignore further guesses quietly.
-            return
+        # Lock immediately so a duplicate/rapid message can't double-resolve the set.
+        game.locked = True
 
         if guess == game.current_answer:
-            game.add_point(user_id)
-            try:
-                await message.add_reaction("\u2705")  # ✅
-            except discord.HTTPException:
-                pass
+            game.add_point()
+            await message.channel.send(f"\u2705 **Correct!** {message.author.mention} scores a point.")
             await self._post_set(message.channel, game)
         else:
-            game.apply_penalty(user_id)
-            try:
-                await message.add_reaction("\u274C")  # ❌
-            except discord.HTTPException:
-                pass
+            await message.channel.send(
+                f"\u274C **Incorrect!** The answer was `{game.current_answer}`. "
+                f"Next set in {WRONG_GUESS_DELAY} seconds..."
+            )
+            await asyncio.sleep(WRONG_GUESS_DELAY)
+            if game.active:
+                await self._post_set(message.channel, game)
 
     @staticmethod
     def _parse_guess(content: str) -> int | None:
@@ -181,18 +184,10 @@ class BloodVsWater(commands.Cog):
         await self._announce_results(channel, game)
 
     async def _announce_results(self, channel: discord.abc.Messageable, game: BloodVsWaterGame):
-        if not game.scores:
-            await channel.send(f"\u23F0 Time's up! Nobody scored a point this round. {WATER}{BLOOD}")
-            return
-
-        ranked = sorted(game.scores.items(), key=lambda kv: kv[1], reverse=True)
-        winner_id, winner_score = ranked[0]
-
-        lines = ["\u23F0 **Time's up!** Final scores:"]
-        for uid, score in ranked:
-            lines.append(f"<@{uid}>: {score}")
-        lines.append(f"\n\U0001F3C6 <@{winner_id}> wins with {winner_score} point(s)!")
-        await channel.send("\n".join(lines))
+        await channel.send(
+            f"\u23F0 **Time's up!** <@{game.owner_id}> finished with **{game.score}** "
+            f"point{'s' if game.score != 1 else ''}. {WATER}{BLOOD}"
+        )
 
 
 async def setup(bot: commands.Bot):
