@@ -71,8 +71,8 @@ class Game:
 
 def generate_problem() -> Problem:
     """Builds a small +/-/x expression with an integer answer."""
-    terms = random.choice([2, 3])
-    numbers = [random.randint(1, 12) for _ in range(terms)]
+    terms = random.choice([2, 4])
+    numbers = [random.randint(1, 15) for _ in range(terms)]
     ops = [random.choice(["+", "-", "x"]) for _ in range(terms - 1)]
 
     display_parts = [str(numbers[0])]
