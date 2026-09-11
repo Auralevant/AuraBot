@@ -31,6 +31,7 @@ Behavior:
 """
 
 import asyncio
+import logging
 import random
 import re
 import time
@@ -38,6 +39,8 @@ from typing import Optional
 
 import discord
 from discord.ext import commands
+
+log = logging.getLogger(__name__)
 
 PHRASE = "I HAVE ESCAPED FROM MY SINS"
 SWIM_PHRASE = "I SWIM FROM MY SINS"
@@ -323,21 +326,32 @@ class DrowningSins(commands.Cog):
             return
 
         game = self.get_game(message.author.id)
-        if not game or game.ended:
+        if not game:
+            log.debug("Swim check: no active game for %s (id=%s)", message.author, message.author.id)
+            return
+        if game.ended:
+            log.debug("Swim check: game for %s already ended", message.author)
             return
 
         # Only react in the channel the run was started in.
         if message.channel.id != game.channel.id:
+            log.debug(
+                "Swim check: channel mismatch for %s (message in %s, game started in %s)",
+                message.author, message.channel.id, game.channel.id,
+            )
             return
 
+        log.debug("Swim check: comparing %r to %r", normalize_loose(message.content), normalize_loose(SWIM_PHRASE))
         if normalize_loose(message.content) != normalize_loose(SWIM_PHRASE):
             return
+
+        log.debug("Swim check: MATCH for %s, adding %s seconds", message.author, TIME_INCREMENT)
 
         # Delete the swim-phrase message right away to keep the channel clean.
         try:
             await message.delete()
-        except discord.HTTPException:
-            pass
+        except discord.HTTPException as exc:
+            log.warning("Swim check: failed to delete message for %s: %s", message.author, exc)
 
         async with game.lock:
             if game.ended:
