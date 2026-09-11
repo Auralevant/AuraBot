@@ -1,9 +1,4 @@
 """
-Drowning Sins - cog handling the Sins Timer + final unscramble phase.
-
-Drop this file in your cogs folder and load it like any other cog:
-    await bot.load_extension("drowning_sins")
-
 Commands:
     !sins         - starts a run (timer begins at 75)
     !escapesins   - locks in the score, moves to the final unscramble phase
@@ -33,6 +28,7 @@ Behavior:
 import asyncio
 import random
 import re
+import time
 from typing import Optional
 
 import discord
@@ -44,7 +40,7 @@ SWIM_PHRASE = "I SWIM FROM MY SINS"
 START_TIME = 75
 TIME_INCREMENT = 5
 UPPER_LIMIT = 150
-EDIT_INTERVAL = 3  # seconds between routine timer message edits (avoids rate limits)
+EDIT_INTERVAL = 6  # seconds between routine timer message edits (avoids rate limits / distraction)
 
 
 def scramble_phrase(phrase: str) -> str:
@@ -75,7 +71,10 @@ def scramble_phrase(phrase: str) -> str:
     return " ".join(scrambled_words)
 
 
-def normalize_loose(text: str) -> str:
+def format_duration(seconds: float) -> str:
+    total = int(round(seconds))
+    minutes, secs = divmod(total, 60)
+    return f"{minutes}m {secs}s" if minutes else f"{secs}s"
     """Uppercase + collapse whitespace - used for the swim phrase check."""
     return " ".join(text.strip().upper().split())
 
@@ -98,6 +97,8 @@ class SinsGame:
         self.scrambled: Optional[str] = None
         self.ended = False
         self.result: Optional[str] = None  # None, "won", or "lost"
+        self.start_time = time.monotonic()
+        self.elapsed: Optional[float] = None
         self.lock = asyncio.Lock()
 
     def build_embed(self, status: Optional[str] = None) -> discord.Embed:
@@ -127,6 +128,9 @@ class SinsGame:
         else:
             command_lines.append("`!escapesins` - Enter Escape Phase")
         embed.add_field(name="Commands", value="\n".join(command_lines), inline=False)
+
+        if self.result and self.elapsed is not None:
+            embed.add_field(name="Total Time", value=format_duration(self.elapsed), inline=True)
 
         if status:
             embed.add_field(name="Status", value=status, inline=False)
@@ -291,6 +295,7 @@ class DrowningSins(commands.Cog):
     async def end_game(self, game: SinsGame, won: bool, reason: str):
         game.ended = True
         game.result = "won" if won else "lost"
+        game.elapsed = time.monotonic() - game.start_time
         if game.task and not game.task.done():
             game.task.cancel()
 
