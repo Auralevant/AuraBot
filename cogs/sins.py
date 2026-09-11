@@ -1,4 +1,9 @@
 """
+Drowning Sins - cog handling the Sins Timer + final unscramble phase.
+
+Drop this file in your cogs folder and load it like any other cog:
+    await bot.load_extension("drowning_sins")
+
 Commands:
     !sins         - starts a run (timer begins at 75)
     !escapesins   - locks in the score, moves to the final unscramble phase
@@ -99,6 +104,7 @@ class SinsGame:
         self.result: Optional[str] = None  # None, "won", or "lost"
         self.start_time = time.monotonic()
         self.elapsed: Optional[float] = None
+        self.has_refreshed_once = False
         self.lock = asyncio.Lock()
 
     def build_embed(self, status: Optional[str] = None) -> discord.Embed:
@@ -147,22 +153,27 @@ class DrowningSins(commands.Cog):
         return self.games.get(user_id)
 
     async def refresh_message(self, game: SinsGame, status: Optional[str] = None, mention: bool = False):
-        """Posts a fresh timer message and deletes the old one, so the game
-        card keeps reappearing at the bottom of the channel instead of
-        getting buried while people are competing. When mention=True, the
-        player is pinged outside the embed (used for game-over moments)."""
+        """Posts a fresh timer message. The very first message (posted by
+        !sins) is left alone permanently. Starting from the second message
+        onward, each refresh deletes the previous refresh message and posts
+        a new one, so the live card keeps reappearing near the bottom of
+        the channel without wiping out the original starting message."""
         embed = game.build_embed(status=status)
         old_message = game.message
         content = game.user.mention if mention else None
         try:
-            game.message = await game.channel.send(content=content, embed=embed)
+            new_message = await game.channel.send(content=content, embed=embed)
         except discord.HTTPException:
             return
-        if old_message is not None:
+
+        if game.has_refreshed_once and old_message is not None:
             try:
                 await old_message.delete()
             except discord.HTTPException:
                 pass
+
+        game.has_refreshed_once = True
+        game.message = new_message
 
     # ---------- commands ----------
 
@@ -342,7 +353,7 @@ class DrowningSins(commands.Cog):
                 )
                 return
 
-            await self.refresh_message(game)
+            await self.refresh_message(game, status="Added 5 to the Sins Timer.")
 
 
 async def setup(bot: commands.Bot):
