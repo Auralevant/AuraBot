@@ -352,19 +352,23 @@ class DrowningSins(commands.Cog):
 
         # Only react in the channel the run was started in.
         if message.channel.id != game.channel.id:
-            if normalize_loose(message.content) == normalize_loose(SWIM_PHRASE):
-                await self._debug(message.channel, f"got the swim phrase, but this game was started in channel {game.channel.id}, not this one ({message.channel.id}).")
+            await self._debug(
+                message.channel,
+                f"saw a message from {message.author}, but their game was started in channel "
+                f"{game.channel.id}, not this one ({message.channel.id}). Content: {message.content!r}",
+            )
             return
 
         if normalize_loose(message.content) != normalize_loose(SWIM_PHRASE):
-            if game.phase == "main" and not message.content:
-                await self._debug(
-                    message.channel,
-                    "this message came through with EMPTY content. That means the Message Content "
-                    "Intent isn't actually active on Discord's side yet, even if your code enables it. "
-                    "Double check the toggle is ON in the Discord Developer Portal under "
-                    "Bot -> Privileged Gateway Intents -> Message Content Intent, then restart the bot.",
-                )
+            # TEMPORARY: report on every message from the player in this
+            # channel while debugging, not just empty ones, so we can see
+            # exactly what content (if any) is coming through.
+            await self._debug(
+                message.channel,
+                f"saw a message from {message.author} in this game's channel. "
+                f"Raw content: {message.content!r} (length {len(message.content)}). "
+                f"Not a match for the swim phrase.",
+            )
             return
 
         await self._debug(message.channel, f"swim phrase matched for {message.author}, adding {TIME_INCREMENT}s now.")
