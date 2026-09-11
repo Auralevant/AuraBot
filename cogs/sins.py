@@ -14,7 +14,8 @@ Behavior:
     - Timer starts at 75 and ticks down by 1 every second.
     - Timer hitting 0 => instant loss ("drowned").
     - Saying "I SWIM FROM MY SINS" (case-insensitive) anywhere in the game
-      channel adds 5 to the timer. Works in both phases.
+      channel adds 5 to the timer and the message is deleted immediately.
+      Works in both phases.
     - If the timer ever exceeds the upper limit (150) => instant loss.
     - !escapesins locks the run and shows a scrambled version of
       "I HAVE ESCAPED FROM MY SINS" (letters scrambled per word, word order kept).
@@ -31,6 +32,7 @@ Behavior:
 
 import asyncio
 import random
+import re
 from typing import Optional
 
 import discord
@@ -79,9 +81,10 @@ def normalize_loose(text: str) -> str:
 
 
 def normalize_tight(text: str) -> str:
-    """Uppercase + strip ALL whitespace - used for the final guess check,
-    since spacing inside the guess doesn't matter, only spelling does."""
-    return "".join(text.upper().split())
+    """Uppercase + strip everything that isn't a letter - used for the final
+    guess check, since spacing/punctuation inside the guess doesn't matter,
+    only spelling does."""
+    return re.sub(r"[^A-Za-z]", "", text).upper()
 
 
 class SinsGame:
@@ -94,11 +97,20 @@ class SinsGame:
         self.task: Optional[asyncio.Task] = None
         self.scrambled: Optional[str] = None
         self.ended = False
+        self.result: Optional[str] = None  # None, "won", or "lost"
         self.lock = asyncio.Lock()
 
     def build_embed(self, status: Optional[str] = None) -> discord.Embed:
-        color = discord.Color.blue() if self.phase == "main" else discord.Color.gold()
-        embed = discord.Embed(title="🌊 Drowning Sins", color=color)
+        if self.result == "lost":
+            emoji, color = "🩸", discord.Color.dark_red()
+        elif self.result == "won":
+            emoji, color = "✅", discord.Color.green()
+        elif self.phase == "final":
+            emoji, color = "🌊", discord.Color.gold()
+        else:
+            emoji, color = "🌊", discord.Color.blue()
+
+        embed = discord.Embed(title=f"{emoji} Drowning Sins", color=color)
         embed.add_field(name="Timer", value=f"**{self.timer}**", inline=True)
         embed.add_field(name="Upper Limit", value=f"**{UPPER_LIMIT}**", inline=True)
         embed.add_field(
@@ -108,6 +120,14 @@ class SinsGame:
         )
         if self.phase == "final" and self.scrambled:
             embed.add_field(name="Unscramble this phrase", value=f"`{self.scrambled}`", inline=False)
+
+        command_lines = ["**I SWIM FROM MY SINS** - Adds 5"]
+        if self.phase == "final":
+            command_lines.append("`!guess <guess>` - Guess Phrase (Capitalization and spacing doesn't matter but spelling does.)")
+        else:
+            command_lines.append("`!escapesins` - Enter Escape Phase")
+        embed.add_field(name="Commands", value="\n".join(command_lines), inline=False)
+
         if status:
             embed.add_field(name="Status", value=status, inline=False)
         embed.set_footer(text=f"Player: {self.user.display_name}")
@@ -121,6 +141,24 @@ class DrowningSins(commands.Cog):
 
     def get_game(self, user_id: int) -> Optional[SinsGame]:
         return self.games.get(user_id)
+
+    async def refresh_message(self, game: SinsGame, status: Optional[str] = None, mention: bool = False):
+        """Posts a fresh timer message and deletes the old one, so the game
+        card keeps reappearing at the bottom of the channel instead of
+        getting buried while people are competing. When mention=True, the
+        player is pinged outside the embed (used for game-over moments)."""
+        embed = game.build_embed(status=status)
+        old_message = game.message
+        content = game.user.mention if mention else None
+        try:
+            game.message = await game.channel.send(content=content, embed=embed)
+        except discord.HTTPException:
+            return
+        if old_message is not None:
+            try:
+                await old_message.delete()
+            except discord.HTTPException:
+                pass
 
     # ---------- commands ----------
 
@@ -168,10 +206,7 @@ class DrowningSins(commands.Cog):
                 "🔒 Score locked in! Unscramble the phrase and submit your answer with "
                 "`!guess <your answer>` before the timer runs out."
             )
-            try:
-                await game.message.edit(embed=game.build_embed(status=status))
-            except discord.HTTPException:
-                await ctx.send(embed=game.build_embed(status=status))
+            await self.refresh_message(game, status=status)
 
     @commands.command(name="guess")
     async def guess_sins(self, ctx: commands.Context, *, guess: str = ""):
@@ -206,12 +241,7 @@ class DrowningSins(commands.Cog):
                 await ctx.message.add_reaction("❌")
             except discord.HTTPException:
                 pass
-            try:
-                await game.message.edit(
-                    embed=game.build_embed(status="❌ Wrong guess! Keep trying with `!guess <your answer>`.")
-                )
-            except discord.HTTPException:
-                pass
+            await self.refresh_message(game, status="❌ Wrong guess! Keep trying with `!guess <your answer>`.")
 
     @commands.command(name="cancelsins")
     async def cancel_sins(self, ctx: commands.Context):
@@ -254,26 +284,18 @@ class DrowningSins(commands.Cog):
 
                     if ticks_since_edit >= EDIT_INTERVAL:
                         ticks_since_edit = 0
-                        try:
-                            await game.message.edit(embed=game.build_embed())
-                        except discord.HTTPException:
-                            pass
+                        await self.refresh_message(game)
         except asyncio.CancelledError:
             return
 
     async def end_game(self, game: SinsGame, won: bool, reason: str):
         game.ended = True
+        game.result = "won" if won else "lost"
         if game.task and not game.task.done():
             game.task.cancel()
 
         status = f"✅ **YOU ESCAPED THE SINS!**\n{reason}" if won else f"❌ **GAME OVER**\n{reason}"
-        try:
-            await game.message.edit(embed=game.build_embed(status=status))
-        except discord.HTTPException:
-            try:
-                await game.channel.send(embed=game.build_embed(status=status))
-            except discord.HTTPException:
-                pass
+        await self.refresh_message(game, status=status, mention=True)
 
         self.games.pop(game.user.id, None)
 
@@ -295,15 +317,17 @@ class DrowningSins(commands.Cog):
         if normalize_loose(message.content) != normalize_loose(SWIM_PHRASE):
             return
 
+        # Delete the swim-phrase message right away to keep the channel clean.
+        try:
+            await message.delete()
+        except discord.HTTPException:
+            pass
+
         async with game.lock:
             if game.ended:
                 return
 
             game.timer += TIME_INCREMENT
-            try:
-                await message.add_reaction("🏊")
-            except discord.HTTPException:
-                pass
 
             if game.timer > UPPER_LIMIT:
                 await self.end_game(
@@ -313,10 +337,7 @@ class DrowningSins(commands.Cog):
                 )
                 return
 
-            try:
-                await game.message.edit(embed=game.build_embed())
-            except discord.HTTPException:
-                pass
+            await self.refresh_message(game)
 
 
 async def setup(bot: commands.Bot):
