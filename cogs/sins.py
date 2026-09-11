@@ -31,7 +31,6 @@ Behavior:
 """
 
 import asyncio
-import logging
 import random
 import re
 import time
@@ -40,8 +39,6 @@ from typing import Optional
 import discord
 from discord.ext import commands
 
-log = logging.getLogger(__name__)
-
 PHRASE = "I HAVE ESCAPED FROM MY SINS"
 SWIM_PHRASE = "I SWIM FROM MY SINS"
 
@@ -49,12 +46,6 @@ START_TIME = 75
 TIME_INCREMENT = 5
 UPPER_LIMIT = 150
 EDIT_INTERVAL = 6  # seconds between routine timer message edits (avoids rate limits / distraction)
-
-# TEMPORARY: while we're tracking down why the swim phrase isn't registering,
-# this posts a short-lived debug message straight into the channel explaining
-# what happened, so you don't need server console/log access to see it.
-# Set this back to False once the swim phrase is confirmed working.
-DEBUG_SWIM = True
 
 
 def scramble_phrase(phrase: str) -> str:
@@ -89,6 +80,9 @@ def format_duration(seconds: float) -> str:
     total = int(round(seconds))
     minutes, secs = divmod(total, 60)
     return f"{minutes}m {secs}s" if minutes else f"{secs}s"
+
+
+def normalize_loose(text: str) -> str:
     """Uppercase + collapse whitespace - used for the swim phrase check."""
     return " ".join(text.strip().upper().split())
 
@@ -160,17 +154,6 @@ class DrowningSins(commands.Cog):
 
     def get_game(self, user_id: int) -> Optional[SinsGame]:
         return self.games.get(user_id)
-
-    async def _debug(self, channel: discord.abc.Messageable, text: str):
-        """Posts a short-lived debug note into the channel (auto-deletes
-        after a few seconds). Only active while DEBUG_SWIM is True."""
-        if not DEBUG_SWIM:
-            return
-        try:
-            msg = await channel.send(f"🔧 debug: {text}")
-            await msg.delete(delay=8)
-        except discord.HTTPException:
-            pass
 
     async def refresh_message(self, game: SinsGame, status: Optional[str] = None, mention: bool = False):
         """Posts a fresh timer message. The very first message (posted by
@@ -343,41 +326,21 @@ class DrowningSins(commands.Cog):
             return
 
         game = self.get_game(message.author.id)
-        if not game:
-            if normalize_loose(message.content) == normalize_loose(SWIM_PHRASE):
-                await self._debug(message.channel, f"got the swim phrase from {message.author}, but no active game is tracked for that user ID ({message.author.id}). Games currently tracked: {list(self.games.keys())}")
-            return
-        if game.ended:
+        if not game or game.ended:
             return
 
         # Only react in the channel the run was started in.
         if message.channel.id != game.channel.id:
-            await self._debug(
-                message.channel,
-                f"saw a message from {message.author}, but their game was started in channel "
-                f"{game.channel.id}, not this one ({message.channel.id}). Content: {message.content!r}",
-            )
             return
 
         if normalize_loose(message.content) != normalize_loose(SWIM_PHRASE):
-            # TEMPORARY: report on every message from the player in this
-            # channel while debugging, not just empty ones, so we can see
-            # exactly what content (if any) is coming through.
-            await self._debug(
-                message.channel,
-                f"saw a message from {message.author} in this game's channel. "
-                f"Raw content: {message.content!r} (length {len(message.content)}). "
-                f"Not a match for the swim phrase.",
-            )
             return
-
-        await self._debug(message.channel, f"swim phrase matched for {message.author}, adding {TIME_INCREMENT}s now.")
 
         # Delete the swim-phrase message right away to keep the channel clean.
         try:
             await message.delete()
-        except discord.HTTPException as exc:
-            await self._debug(message.channel, f"could not delete the swim message: {exc}. The bot likely needs the 'Manage Messages' permission in this channel.")
+        except discord.HTTPException:
+            pass
 
         async with game.lock:
             if game.ended:
