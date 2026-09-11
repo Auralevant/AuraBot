@@ -50,6 +50,12 @@ TIME_INCREMENT = 5
 UPPER_LIMIT = 150
 EDIT_INTERVAL = 6  # seconds between routine timer message edits (avoids rate limits / distraction)
 
+# TEMPORARY: while we're tracking down why the swim phrase isn't registering,
+# this posts a short-lived debug message straight into the channel explaining
+# what happened, so you don't need server console/log access to see it.
+# Set this back to False once the swim phrase is confirmed working.
+DEBUG_SWIM = True
+
 
 def scramble_phrase(phrase: str) -> str:
     """Keeps the word-length structure of the phrase (e.g. 1 4 7 4 2 4 for
@@ -154,6 +160,17 @@ class DrowningSins(commands.Cog):
 
     def get_game(self, user_id: int) -> Optional[SinsGame]:
         return self.games.get(user_id)
+
+    async def _debug(self, channel: discord.abc.Messageable, text: str):
+        """Posts a short-lived debug note into the channel (auto-deletes
+        after a few seconds). Only active while DEBUG_SWIM is True."""
+        if not DEBUG_SWIM:
+            return
+        try:
+            msg = await channel.send(f"🔧 debug: {text}")
+            await msg.delete(delay=8)
+        except discord.HTTPException:
+            pass
 
     async def refresh_message(self, game: SinsGame, status: Optional[str] = None, mention: bool = False):
         """Posts a fresh timer message. The very first message (posted by
@@ -327,31 +344,36 @@ class DrowningSins(commands.Cog):
 
         game = self.get_game(message.author.id)
         if not game:
-            log.debug("Swim check: no active game for %s (id=%s)", message.author, message.author.id)
+            if normalize_loose(message.content) == normalize_loose(SWIM_PHRASE):
+                await self._debug(message.channel, f"got the swim phrase from {message.author}, but no active game is tracked for that user ID ({message.author.id}). Games currently tracked: {list(self.games.keys())}")
             return
         if game.ended:
-            log.debug("Swim check: game for %s already ended", message.author)
             return
 
         # Only react in the channel the run was started in.
         if message.channel.id != game.channel.id:
-            log.debug(
-                "Swim check: channel mismatch for %s (message in %s, game started in %s)",
-                message.author, message.channel.id, game.channel.id,
-            )
+            if normalize_loose(message.content) == normalize_loose(SWIM_PHRASE):
+                await self._debug(message.channel, f"got the swim phrase, but this game was started in channel {game.channel.id}, not this one ({message.channel.id}).")
             return
 
-        log.debug("Swim check: comparing %r to %r", normalize_loose(message.content), normalize_loose(SWIM_PHRASE))
         if normalize_loose(message.content) != normalize_loose(SWIM_PHRASE):
+            if game.phase == "main" and not message.content:
+                await self._debug(
+                    message.channel,
+                    "this message came through with EMPTY content. That means the Message Content "
+                    "Intent isn't actually active on Discord's side yet, even if your code enables it. "
+                    "Double check the toggle is ON in the Discord Developer Portal under "
+                    "Bot -> Privileged Gateway Intents -> Message Content Intent, then restart the bot.",
+                )
             return
 
-        log.debug("Swim check: MATCH for %s, adding %s seconds", message.author, TIME_INCREMENT)
+        await self._debug(message.channel, f"swim phrase matched for {message.author}, adding {TIME_INCREMENT}s now.")
 
         # Delete the swim-phrase message right away to keep the channel clean.
         try:
             await message.delete()
         except discord.HTTPException as exc:
-            log.warning("Swim check: failed to delete message for %s: %s", message.author, exc)
+            await self._debug(message.channel, f"could not delete the swim message: {exc}. The bot likely needs the 'Manage Messages' permission in this channel.")
 
         async with game.lock:
             if game.ended:
