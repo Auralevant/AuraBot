@@ -38,7 +38,7 @@ SUSPECTS = [
     },
     {
         "name": "Tyler",
-        "statement": "I don't think anyone who bit the apple and made jury did this.",
+        "statement": "I think Hazel is innocent. She is just pure and I don't see her doing this.",
         "condition": "This statement is false if Omega lost an HOH competition.",
         "correct": False,
     },
@@ -86,7 +86,7 @@ SUSPECTS = [
     },
     {
         "name": "Emerald",
-        "statement": "I think it's someone that won the Veto.",
+        "statement": "I refuse to provide a statement but I am innocent.",
         "condition": "This is false if the most votes to evict someone for one eviction night was 11.",
         "correct": False,
     },
